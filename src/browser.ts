@@ -11,43 +11,84 @@ const DEFAULT_BASE = process.env.OPENCUT_BASE_URL ?? "http://localhost:3000";
 const HEADLESS = process.env.OPENCUT_HEADLESS !== "false"; // default headless
 const VIDEO_DIR = process.env.OPENCUT_VIDEO_DIR; // if set, record screencast
 
-let sessionPromise: Promise<EditorSession> | null = null;
+/**
+ * Buttons the editor pops up on first load that we need to click through
+ * before `window.__editor` becomes usable. Ordered by priority: primary
+ * "close" verbs first, "Next" last so a multi-step tour still advances if
+ * no shortcut is present. Table-driven so `dismissBootDialogs` stays flat.
+ */
+const DIALOG_DISMISS_BUTTONS = [
+	'button:has-text("Take a look anyway")',   // mobile gate
+	'button:has-text("Get started")',           // welcome tour final
+	'button:has-text("Skip the tour")',
+	'button:has-text("Skip tour")',
+	'button:has-text("Skip")',
+	'button:has-text("Got it")',
+	'button:has-text("Continue")',
+	'button:has-text("Close")',
+	'button[aria-label="Close"]',               // Radix DialogClose "X"
+	'button:has-text("Next")',                  // advance a wizard step
+] as const;
 
-async function createSession(): Promise<EditorSession> {
-	const browser = await chromium.launch({ headless: HEADLESS });
-	const context = await browser.newContext({
-		viewport: { width: 1600, height: 900 },
-		recordVideo: VIDEO_DIR ? { dir: VIDEO_DIR, size: { width: 1600, height: 900 } } : undefined,
-	});
-	const page = await context.newPage();
+const MAX_DIALOG_HOPS = 6;
 
-	page.on("pageerror", (err) => {
-		console.error("[browser pageerror]", err.message);
-	});
+class SessionHolder {
+	private promise: Promise<EditorSession> | null = null;
 
-	await page.goto(`${DEFAULT_BASE}/projects`, { waitUntil: "networkidle" });
-
-	const created = await tryCreateProject(page);
-	if (!created) {
-		throw new Error("failed to find 'New project' button on /projects");
+	get(): Promise<EditorSession> {
+		if (!this.promise) this.promise = this.createSession();
+		return this.promise;
 	}
 
-	await page.waitForURL("**/editor/**", { timeout: 15_000 });
-	const projectId = page.url().split("/editor/")[1]!.split("?")[0]!;
+	async close(): Promise<void> {
+		if (!this.promise) return;
+		const s = await this.promise;
+		await s.context.close();
+		await s.browser.close();
+		this.promise = null;
+	}
 
-	await dismissMobileGate(page);
-	await waitForEditor(page);
+	private async createSession(): Promise<EditorSession> {
+		const browser = await chromium.launch({ headless: HEADLESS });
+		const context = await browser.newContext({
+			viewport: { width: 1600, height: 900 },
+			recordVideo: VIDEO_DIR
+				? { dir: VIDEO_DIR, size: { width: 1600, height: 900 } }
+				: undefined,
+		});
+		const page = await context.newPage();
 
-	return { browser, context, page, projectId };
+		// classic loads react-scan from unpkg in dev mode (layout.tsx). Block it so
+		// the demo screencast isn't cluttered with purple component outlines.
+		await page.route("**/react-scan/**", (route) => route.abort());
+
+		page.on("pageerror", (err) => {
+			console.error("[browser pageerror]", err.message);
+		});
+
+		await page.goto(`${DEFAULT_BASE}/projects`, { waitUntil: "networkidle" });
+		const created = await tryCreateProject(page);
+		if (!created) {
+			throw new Error("failed to find 'New project' button on /projects");
+		}
+		await page.waitForURL("**/editor/**", { timeout: 15_000 });
+		const projectId = page.url().split("/editor/")[1]!.split("?")[0]!;
+
+		await dismissBootDialogs(page);
+		await waitForEditor(page);
+
+		return { browser, context, page, projectId };
+	}
 }
 
+const holder = new SessionHolder();
+
 async function tryCreateProject(page: Page): Promise<boolean> {
-	const selectors = [
+	for (const sel of [
 		'button:has-text("New project")',
 		'button:has-text("New Project")',
 		'a:has-text("New project")',
-	];
-	for (const sel of selectors) {
+	]) {
 		const loc = page.locator(sel);
 		if ((await loc.count()) > 0) {
 			await loc.first().click();
@@ -57,26 +98,35 @@ async function tryCreateProject(page: Page): Promise<boolean> {
 	return false;
 }
 
-async function dismissMobileGate(page: Page): Promise<void> {
-	const skip = page.locator('button:has-text("Take a look anyway")');
-	if ((await skip.count()) > 0) {
-		await skip.first().click();
-		await page.waitForTimeout(300);
+/**
+ * Click through mobile-gate + welcome tour + any residual Radix dialog.
+ * Any single selector in DIALOG_DISMISS_BUTTONS may match; keep iterating
+ * until nothing responds, up to MAX_DIALOG_HOPS. Falls back to Escape.
+ */
+async function dismissBootDialogs(page: Page): Promise<void> {
+	for (let hop = 0; hop < MAX_DIALOG_HOPS; hop++) {
+		if (!(await clickFirstMatching(page, DIALOG_DISMISS_BUTTONS))) break;
+		await page.waitForTimeout(200);
 	}
-	// Welcome / beta dialog uses an "X" close button in DialogClose.
-	// Iterate a few candidate texts so any of them dismisses cleanly.
-	for (const label of ["Skip the tour", "Close", "Got it", "Continue"]) {
-		const btn = page.locator(`button:has-text("${label}")`).first();
-		if ((await btn.count()) > 0) {
-			try {
-				await btn.click({ timeout: 500 });
-				await page.waitForTimeout(200);
-			} catch {}
+	await page.keyboard.press("Escape").catch(() => {});
+	await page.waitForTimeout(300);
+}
+
+async function clickFirstMatching(
+	page: Page,
+	selectors: readonly string[],
+): Promise<boolean> {
+	for (const sel of selectors) {
+		const btn = page.locator(sel).first();
+		if ((await btn.count()) === 0) continue;
+		try {
+			await btn.click({ timeout: 500 });
+			return true;
+		} catch {
+			// selector matched but click timed out — try the next one
 		}
 	}
-	// Fallback: hit Escape to close any remaining Radix dialog.
-	await page.keyboard.press("Escape").catch(() => {});
-	await page.waitForTimeout(200);
+	return false;
 }
 
 async function waitForEditor(page: Page): Promise<void> {
@@ -87,18 +137,11 @@ async function waitForEditor(page: Page): Promise<void> {
 }
 
 export async function getSession(): Promise<EditorSession> {
-	if (!sessionPromise) {
-		sessionPromise = createSession();
-	}
-	return sessionPromise;
+	return holder.get();
 }
 
 export async function closeSession(): Promise<void> {
-	if (!sessionPromise) return;
-	const s = await sessionPromise;
-	await s.context.close();
-	await s.browser.close();
-	sessionPromise = null;
+	return holder.close();
 }
 
 export async function evalInEditor<T>(
