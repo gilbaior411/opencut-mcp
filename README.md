@@ -7,6 +7,17 @@ in a Playwright-controlled browser.
 **Status**: PoC for kenimoto.dev article series. Requires the `kenimo49/opencut-classic`
 fork with the [Phase 1 exposure patch](https://github.com/kenimo49/opencut-classic/commit/eca73042).
 
+## Demo
+
+`scripts/demo.ts` runs a full end-to-end sequence: create a project, upload a video
++ audio file, place both on the timeline via auto-placement, split the video at 5s.
+The Playwright screencast below is that run recorded verbatim.
+
+<video src="https://github.com/kenimo49/opencut-mcp/raw/main/docs/demo.mp4" controls poster="docs/demo-poster.png" width="800"></video>
+
+<!-- Fallback for Markdown viewers that ignore <video>. GitHub renders <video> above; other viewers show the GIF. -->
+![opencut-mcp demo (12 second GIF fallback)](docs/demo.gif)
+
 ## Tools
 
 | tool | description |
