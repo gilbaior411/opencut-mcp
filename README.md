@@ -1,11 +1,28 @@
 # opencut-mcp
 
-MCP (Model Context Protocol) server for [OpenCut classic](https://github.com/opencut-app/opencut-classic).
-Lets an LLM agent (Claude Code, Cline, etc.) drive the video editor via `window.__editor`
+MCP (Model Context Protocol) server for the OpenCut classic video editor.
+Lets an LLM agent (Claude Code, Cline, etc.) drive the timeline via `window.__editor`
 in a Playwright-controlled browser.
 
-**Status**: PoC for kenimoto.dev article series. Requires the `kenimo49/opencut-classic`
-fork with the [Phase 1 exposure patch](https://github.com/kenimo49/opencut-classic/commit/eca73042).
+**Status**: PoC for a kenimoto.dev article series.
+
+## Runs against a fork, not upstream
+
+This server does **not** target [`opencut-app/opencut-classic`](https://github.com/opencut-app/opencut-classic)
+(archived). It targets the **[`kenimo49/opencut-classic`](https://github.com/kenimo49/opencut-classic)
+fork**, which carries a small patch series that exposes internals needed for
+automation. Point your `docker compose` / `bun dev:web` at the fork's `main`.
+
+| Patch | What it exposes | Used by which tools |
+|-------|-----------------|---------------------|
+| [`eca73042`](https://github.com/kenimo49/opencut-classic/commit/eca73042) — Phase 1 | `window.__editor` (the `EditorCore` singleton) | every tool |
+| [`a7443ec8`](https://github.com/kenimo49/opencut-classic/commit/a7443ec8) — Phase 1.1 | `window.__opencut.mediaTimeFromSeconds` (+ `TICKS_PER_SECOND`, `mediaTime`, `roundMediaTime`) | any tool that takes a time argument (`insert_clip`, `split_at`, `move`, `trim`) |
+
+The fork may drift further from upstream as we add hooks — e.g. `data-testid`
+anchors for wait/assertion, or a headless-export toggle. Track the two together;
+a version of this server may not work against an arbitrary snapshot of the fork.
+Compatibility is pinned at repo level, not by semver (yet). The current commit of
+this server was validated against `kenimo49/opencut-classic@a7443ec8`.
 
 ## Demo
 
@@ -35,8 +52,14 @@ The Playwright screencast below is that run recorded verbatim.
 ## Running
 
 ```sh
-# 1. Start classic (docker + bun dev:web on 3000). See kenimo49/opencut-classic README.
-# 2. Install this MCP:
+# 1. Start the FORK of classic (docker + bun dev:web on 3000).
+git clone https://github.com/kenimo49/opencut-classic.git
+cd opencut-classic
+# ... see that repo's README for docker compose + env.local setup
+bun run dev:web   # http://localhost:3000
+
+# 2. Install and run this MCP (in a separate shell):
+cd ../opencut-mcp
 bun install
 bunx tsx src/index.ts   # stdio transport
 
