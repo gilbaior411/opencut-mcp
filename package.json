@@ -2,6 +2,25 @@
   "name": "opencut-mcp",
   "version": "0.1.0",
   "description": "MCP server for OpenCut classic — Claude drives the timeline via Playwright + window.__editor",
+  "author": "ken imoto",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kenimo49/opencut-mcp"
+  },
+  "homepage": "https://github.com/kenimo49/opencut-mcp",
+  "bugs": {
+    "url": "https://github.com/kenimo49/opencut-mcp/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "opencut",
+    "video-editor",
+    "playwright",
+    "claude",
+    "ai-agent"
+  ],
   "type": "module",
   "main": "dist/index.js",
   "bin": {
