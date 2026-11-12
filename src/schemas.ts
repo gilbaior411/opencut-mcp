@@ -8,6 +8,19 @@ export const AddTrackInput = z.object({
 	index: z.number().int().optional(),
 });
 
+export const AddTextInput = z.object({
+	content: z.string().min(1),
+	startTime: z.number().nonnegative().optional(),
+	duration: z.number().positive().optional(),
+	name: z.string().optional(),
+	fontSize: z.number().positive().optional(),
+	fontFamily: z.string().optional(),
+	color: z.string().optional(),
+	trackId: z.string().optional(),
+});
+
+export const RenameProjectInput = z.object({ name: z.string().min(1) });
+
 export const AddMediaInput = z.object({ filePath: z.string() });
 
 export const InsertClipInput = z.object({

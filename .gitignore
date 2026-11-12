@@ -1,5 +1,7 @@
 node_modules/
 dist/
+.opencut-profile/
+.opencut-project-id
 *.log
 media/
 .env

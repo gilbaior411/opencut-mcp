@@ -54,13 +54,18 @@ export async function getState() {
 				type: el.type,
 				name: el.name,
 				startTime: el.startTime,
+				startTimeSeconds: el.startTime / window.__opencut.TICKS_PER_SECOND,
 				duration: el.duration,
+				durationSeconds: el.duration / window.__opencut.TICKS_PER_SECOND,
+				content: el.params?.content ?? null,
 				mediaId: el.mediaId,
 			})),
 		}));
 		return {
-			projectId: e.project.getActiveOrNull()?.id ?? null,
+			projectId: e.project.getActiveOrNull()?.metadata.id ?? null,
+			projectName: e.project.getActiveOrNull()?.metadata.name ?? null,
 			duration: e.timeline.getTotalDuration(),
+			durationSeconds: e.timeline.getTotalDuration() / window.__opencut.TICKS_PER_SECOND,
 			lastFrame: e.timeline.getLastFrameTime?.() ?? null,
 			tracks: {
 				main: summarize([tracks?.main]),
@@ -70,6 +75,19 @@ export async function getState() {
 			assets: e.media.getAssets?.().map(a => ({ id: a.id, name: a.name, type: a.type, duration: a.duration })) ?? [],
 		};
 	`);
+}
+
+export async function renameProject({ name }: { name: string }) {
+	return evalInEditor<{ id: string; name: string }>(
+		`
+		const project = window.__editor.project.getActiveOrNull();
+		if (!project) throw new Error("No active project");
+		await window.__editor.project.renameProject({ id: project.metadata.id, name: args.name });
+		window.__editor.save.flush();
+		return { id: project.metadata.id, name: args.name };
+		`,
+		{ name },
+	);
 }
 
 export async function addTrack(input: AddTrackInput) {
@@ -199,12 +217,90 @@ export async function insertClip(input: InsertClipInput) {
 	);
 }
 
+export type AddTextInput = {
+	content: string;
+	startTime?: number;
+	duration?: number;
+	name?: string;
+	fontSize?: number;
+	fontFamily?: string;
+	color?: string;
+	trackId?: string;
+};
+
+export async function addText(input: AddTextInput) {
+	return evalInEditor<unknown>(
+		`
+		const e = window.__editor;
+		const startTime = args.startTime ?? 0;
+		const duration = args.duration ?? 3;
+		const element = window.__opencut.createTextElement({
+			content: args.content,
+			startTimeSeconds: startTime,
+			durationSeconds: duration,
+			name: args.name,
+			fontSize: args.fontSize,
+			fontFamily: args.fontFamily,
+			color: args.color,
+		});
+		const placement = args.trackId
+			? { mode: "explicit", trackId: args.trackId }
+			: { mode: "auto", trackType: "text" };
+		e.timeline.insertElement({ element, placement });
+		const tracks = e.scenes.getActiveScene().tracks;
+		const allTracks = [
+			...(tracks.main ? [tracks.main] : []),
+			...(tracks.overlay ?? []),
+			...(tracks.audio ?? []),
+		];
+		const startTicks = window.__opencut.mediaTimeFromSeconds({ seconds: startTime });
+		const inserted = allTracks
+			.flatMap((track) => track.elements.map((item) => ({ ...item, trackId: track.id })))
+			.find((item) => item.type === "text" && item.startTime === startTicks && item.params?.content === args.content);
+		return {
+			inserted: !!inserted,
+			trackId: inserted?.trackId ?? null,
+			elementId: inserted?.id ?? null,
+			startTime,
+			duration,
+		};
+		`,
+		{ ...input },
+	);
+}
+
 export async function splitAt(input: SplitAtInput) {
 	return evalInEditor<unknown>(
 		`
 		const t = window.__opencut.mediaTimeFromSeconds({ seconds: args.time });
-		window.__editor.timeline.splitElements({ elements: args.elementIds, time: t });
-		return { ok: true, totalDuration: window.__editor.timeline.getTotalDuration() };
+	const scene = window.__editor.scenes.getActiveScene();
+	const tracks = scene?.tracks;
+	const allTracks = [
+		...(tracks.main ? [tracks.main] : []),
+		...(tracks.overlay ?? []),
+		...(tracks.audio ?? []),
+	];
+	const elements = args.elementIds
+		.map((elementId) => {
+			const track = allTracks.find((item) =>
+				item.elements.some((element) => element.id === elementId),
+			);
+			return track ? { trackId: track.id, elementId } : null;
+		})
+		.filter((item) => item !== null);
+	if (elements.length !== args.elementIds.length) {
+		throw new Error("One or more element IDs were not found on the timeline");
+	}
+	const rightSideElements = window.__editor.timeline.splitElements({
+		elements,
+		splitTime: t,
+	});
+		return {
+			ok: true,
+			splitCount: rightSideElements.length,
+			rightSideElements,
+			totalDuration: window.__editor.timeline.getTotalDuration(),
+		};
 		`,
 		{ ...input },
 	);

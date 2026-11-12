@@ -1,7 +1,8 @@
-import { type Browser, type BrowserContext, type Page, chromium } from "playwright";
+import { type BrowserContext, type Page, chromium } from "playwright";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
 
 export type EditorSession = {
-	browser: Browser;
 	context: BrowserContext;
 	page: Page;
 	projectId: string;
@@ -10,6 +11,8 @@ export type EditorSession = {
 const DEFAULT_BASE = process.env.OPENCUT_BASE_URL ?? "http://localhost:3000";
 const HEADLESS = process.env.OPENCUT_HEADLESS !== "false"; // default headless
 const VIDEO_DIR = process.env.OPENCUT_VIDEO_DIR; // if set, record screencast
+const PROFILE_DIR = resolve(process.env.OPENCUT_PROFILE_DIR ?? ".opencut-profile");
+const PROJECT_ID_FILE = resolve(".opencut-project-id");
 
 /**
  * Buttons the editor pops up on first load that we need to click through
@@ -44,19 +47,20 @@ class SessionHolder {
 		if (!this.promise) return;
 		const s = await this.promise;
 		await s.context.close();
-		await s.browser.close();
 		this.promise = null;
 	}
 
 	private async createSession(): Promise<EditorSession> {
-		const browser = await chromium.launch({ headless: HEADLESS });
-		const context = await browser.newContext({
+		await mkdir(PROFILE_DIR, { recursive: true });
+		const context = await chromium.launchPersistentContext(PROFILE_DIR, {
+			executablePath: process.env.CHROMIUM_PATH,
+			headless: HEADLESS,
 			viewport: { width: 1600, height: 900 },
 			recordVideo: VIDEO_DIR
 				? { dir: VIDEO_DIR, size: { width: 1600, height: 900 } }
 				: undefined,
 		});
-		const page = await context.newPage();
+		const page = context.pages()[0] ?? await context.newPage();
 
 		// classic loads react-scan from unpkg in dev mode (layout.tsx). Block it so
 		// the demo screencast isn't cluttered with purple component outlines.
@@ -66,18 +70,41 @@ class SessionHolder {
 			console.error("[browser pageerror]", err.message);
 		});
 
-		await page.goto(`${DEFAULT_BASE}/projects`, { waitUntil: "networkidle" });
-		const created = await tryCreateProject(page);
-		if (!created) {
-			throw new Error("failed to find 'New project' button on /projects");
+		let projectId = process.env.OPENCUT_PROJECT_ID;
+		if (!projectId) {
+			try {
+				projectId = (await readFile(PROJECT_ID_FILE, "utf8")).trim();
+			} catch {
+				projectId = undefined;
+			}
 		}
-		await page.waitForURL("**/editor/**", { timeout: 15_000 });
-		const projectId = page.url().split("/editor/")[1]!.split("?")[0]!;
+
+		if (projectId) {
+			await page.goto(`${DEFAULT_BASE}/editor/${encodeURIComponent(projectId)}`, {
+				waitUntil: "networkidle",
+			});
+		} else {
+			await page.goto(`${DEFAULT_BASE}/projects`, { waitUntil: "networkidle" });
+			const created = await tryCreateProject(page);
+			if (!created) {
+				throw new Error("failed to find 'New project' button on /projects");
+			}
+			await page.waitForURL("**/editor/**", { timeout: 15_000 });
+			projectId = page.url().split("/editor/")[1]!.split("?")[0]!;
+			await writeFile(PROJECT_ID_FILE, projectId, "utf8");
+		}
 
 		await dismissBootDialogs(page);
 		await waitForEditor(page);
+		const activeProjectId = await page.evaluate(() =>
+			(window as unknown as { __editor: { project: { getActiveOrNull: () => { metadata: { id: string } } | null } } })
+				.__editor.project.getActiveOrNull()?.metadata.id ?? null,
+		);
+		if (activeProjectId !== projectId) {
+			throw new Error(`OpenCut loaded project ${activeProjectId ?? "none"}; expected ${projectId}`);
+		}
 
-		return { browser, context, page, projectId };
+		return { context, page, projectId };
 	}
 }
 

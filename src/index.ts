@@ -13,11 +13,11 @@ import {
 import { closeSession, getSession } from "./browser.js";
 import {
 	AddMediaInput,
-	AddTrackInput,
-	DeleteInput,
+	AddTextInput,
 	ExportInput,
 	InsertClipInput,
 	MoveInput,
+	RenameProjectInput,
 	ScreenshotInput,
 	SplitAtInput,
 	TrimInput,
@@ -35,13 +35,13 @@ const emptyInputSchema = { type: "object", properties: {} } as const;
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
 	tools: [
 		{ name: "opencut_get_state", description: "Read timeline duration + track / element summary.", inputSchema: emptyInputSchema },
-		{ name: "opencut_add_track", description: "Add a video/audio/text/graphic/effect track. Returns trackId.", inputSchema: zodToJson(AddTrackInput) },
+		{ name: "opencut_rename_project", description: "Rename the active local project.", inputSchema: zodToJson(RenameProjectInput) },
 		{ name: "opencut_add_media", description: "Upload a local file as MediaAsset. Returns { id, name, duration, type }.", inputSchema: zodToJson(AddMediaInput) },
+		{ name: "opencut_add_text", description: "Insert a text title using the editor's validated text defaults. Times are seconds.", inputSchema: zodToJson(AddTextInput) },
 		{ name: "opencut_insert_clip", description: "Insert an element referencing a MediaAsset onto a track.", inputSchema: zodToJson(InsertClipInput) },
 		{ name: "opencut_split_at", description: "Split element(s) at time. Undoable via opencut_undo.", inputSchema: zodToJson(SplitAtInput) },
 		{ name: "opencut_move", description: "Move element start (optionally to a new track).", inputSchema: zodToJson(MoveInput) },
 		{ name: "opencut_trim", description: "Update element trim / duration.", inputSchema: zodToJson(TrimInput) },
-		{ name: "opencut_delete", description: "Delete element(s).", inputSchema: zodToJson(DeleteInput) },
 		{ name: "opencut_undo", description: "Undo the last command.", inputSchema: emptyInputSchema },
 		{ name: "opencut_redo", description: "Redo the last undone command.", inputSchema: emptyInputSchema },
 		{ name: "opencut_export", description: "Trigger renderer.exportProject and wait for completion.", inputSchema: zodToJson(ExportInput) },
@@ -63,13 +63,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function runTool(name: string, args: Record<string, unknown>): Promise<unknown> {
 	switch (name) {
 		case "opencut_get_state": return tools.getState();
-		case "opencut_add_track": return tools.addTrack(AddTrackInput.parse(args));
+		case "opencut_rename_project": return tools.renameProject(RenameProjectInput.parse(args));
 		case "opencut_add_media": return tools.addMedia(AddMediaInput.parse(args));
+		case "opencut_add_text": return tools.addText(AddTextInput.parse(args));
 		case "opencut_insert_clip": return tools.insertClip(InsertClipInput.parse(args));
 		case "opencut_split_at": return tools.splitAt(SplitAtInput.parse(args));
 		case "opencut_move": return tools.moveElement(MoveInput.parse(args));
 		case "opencut_trim": return tools.trimElement(TrimInput.parse(args));
-		case "opencut_delete": return tools.deleteElements(DeleteInput.parse(args));
 		case "opencut_undo": return tools.undo();
 		case "opencut_redo": return tools.redo();
 		case "opencut_export": return tools.exportProject(ExportInput.parse(args));
